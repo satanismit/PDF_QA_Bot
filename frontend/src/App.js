@@ -85,7 +85,8 @@ function App() {
     try {
       const res = await axios.post("http://localhost:4000/ask", {
         question: question.trim(),
-        sessionId: sessionId
+        sessionId: sessionId,
+        history: chat
       });
       setChat(prev => [...prev, { role: "bot", text: res.data.answer }]);
     } catch (e) {

@@ -54,7 +54,7 @@ export const uploadDocument = async (file, sessionId) => {
  * @param {string[]} doc_ids - Array of document IDs to query
  * @returns {Promise<{answer: string, confidence_score: number}>}
  */
-export const askQuestion = async (question, sessionId, doc_ids) => {
+export const askQuestion = async (question, sessionId, doc_ids, history = []) => {
   if (!question.trim()) {
     throw new Error("Question cannot be empty");
   }
@@ -77,6 +77,7 @@ export const askQuestion = async (question, sessionId, doc_ids) => {
         question,
         sessionId,
         doc_ids,
+        history,
       },
       { signal: controller.signal }
     );

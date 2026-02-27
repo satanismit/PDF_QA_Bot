@@ -8,22 +8,19 @@ const rateLimit = require("express-rate-limit");
 const session = require("express-session");
 require("dotenv").config();
 
-const app = express(); // FIX: removed duplicate declaration
-
+const app = express();
 
 const PORT = process.env.PORT || 4000;
 const RAG_URL = process.env.RAG_SERVICE_URL || "http://localhost:5000";
-const SESSION_SECRET = process.env.SESSION_SECRET; // FIX: removed hardcoded secret
+const SESSION_SECRET = process.env.SESSION_SECRET;
 
 if (!SESSION_SECRET) {
   throw new Error("SESSION_SECRET must be set in environment variables");
 }
 
-
 app.set("trust proxy", 1);
 app.use(cors());
 app.use(express.json());
-
 
 app.use(
   session({
@@ -36,7 +33,6 @@ app.use(
     },
   })
 );
-
 
 const makeLimiter = (max, msg) =>
   rateLimit({
@@ -51,7 +47,6 @@ const uploadLimiter = makeLimiter(5, "Too many PDF uploads, try again later.");
 const askLimiter = makeLimiter(30, "Too many questions, try again later.");
 const summarizeLimiter = makeLimiter(10, "Too many summarization requests.");
 const compareLimiter = makeLimiter(10, "Too many comparison requests.");
-
 
 const UPLOAD_DIR = path.resolve(__dirname, "uploads");
 
@@ -68,7 +63,6 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
-
 
 app.get("/healthz", (req, res) => {
   res.status(200).json({ status: "healthy", service: "pdf-qa-gateway" });
@@ -94,8 +88,12 @@ app.get("/readyz", async (req, res) => {
   }
 });
 
+app.post("/upload", upload.single("file"), uploadLimiter, async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file uploaded." });
 
-    const filePath = path.resolve(req.file.path);
+  try {
+    const formData = new FormData();
+    const fileStream = fs.createReadStream(req.file.path);
 
     const response = await axios.post(
       `${RAG_URL}/upload`,
@@ -106,7 +104,6 @@ app.get("/readyz", async (req, res) => {
       }
     );
 
-    // Store sessionId returned from FastAPI
     if (req.session) {
       req.session.currentSessionId = response.data.session_id;
       req.session.chatHistory = [];
@@ -122,19 +119,24 @@ app.get("/readyz", async (req, res) => {
   }
 });
 
-
 app.post("/ask", askLimiter, async (req, res) => {
-  const { question, session_ids } = req.body;
+  const { question, session_ids, sessionId, history = [] } = req.body;
 
   if (!question) return res.status(400).json({ error: "Missing question." });
-  if (!session_ids || session_ids.length === 0) {
-    return res.status(400).json({ error: "Missing session_ids." });
+
+  let final_session_ids = session_ids || [];
+  if (final_session_ids.length === 0 && sessionId) {
+    final_session_ids = [sessionId];
+  }
+
+  if (final_session_ids.length === 0) {
+    return res.status(400).json({ error: "Missing session_ids or sessionId." });
   }
 
   try {
     const response = await axios.post(
       `${RAG_URL}/ask`,
-      { question, session_ids },
+      { question, session_ids: final_session_ids, history },
       { timeout: 180000 }
     );
 
@@ -144,7 +146,6 @@ app.post("/ask", askLimiter, async (req, res) => {
     return res.status(500).json({ error: "Error getting answer." });
   }
 });
-
 
 app.post("/summarize", summarizeLimiter, async (req, res) => {
   const { session_ids } = req.body;
@@ -167,7 +168,6 @@ app.post("/summarize", summarizeLimiter, async (req, res) => {
   }
 });
 
-
 app.post("/compare", compareLimiter, async (req, res) => {
   const { session_ids } = req.body;
 
@@ -189,11 +189,8 @@ app.post("/compare", compareLimiter, async (req, res) => {
   }
 });
 
-
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-app.listen(PORT, () =>
-  console.log(`Backend running on http://localhost:${PORT}`)
-);
+app.listen(PORT, () => console.log(`Backend running on http://localhost:${PORT}`));

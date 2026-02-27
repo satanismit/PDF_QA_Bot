@@ -18,7 +18,7 @@ All builders follow the same contract:
     are the primary source of echoed instruction text.
 """
 
-__all__ = ["build_ask_prompt", "build_summarize_prompt", "build_compare_prompt"]
+__all__ = ["build_ask_prompt", "build_summarize_prompt", "build_compare_prompt", "build_condense_prompt"]
 
 
 # ---------------------------------------------------------------------------
@@ -137,4 +137,36 @@ def build_compare_prompt(per_doc_contexts: list[str]) -> str:
         "\n\n".join(doc_blocks),
         "",
         "Comparison:",
+    ])
+
+
+def build_condense_prompt(question: str, conversation_context: str) -> str:
+    """
+    Build the minimal prompt for query condensation.
+
+    Parameters
+    ----------
+    question:
+        The latest follow-up question.
+    conversation_context:
+        Recent chat history string.
+
+    Returns
+    -------
+    str
+        Prompt string telling the LLM to rewrite the question.
+    """
+    conv = _truncate(conversation_context.strip(), _MAX_CONV_CHARS)
+    instruction = (
+        "Rewrite the following follow-up question into a standalone "
+        "search query based on the chat history. Do not answer it. Just output the query."
+    )
+    
+    return "\n".join([
+        instruction,
+        "",
+        f"History: {conv}",
+        f"Question: {question}",
+        "",
+        "Query:",
     ])

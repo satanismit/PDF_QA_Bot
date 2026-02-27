@@ -26,7 +26,7 @@ from PIL import Image
 from utils.postprocess import extract_final_answer, extract_final_summary, extract_comparison
 
 # Centralised minimal prompt builders (short prompts → less instruction echoing).
-from utils.prompt_templates import build_ask_prompt, build_summarize_prompt, build_compare_prompt
+from utils.prompt_templates import build_ask_prompt, build_summarize_prompt, build_compare_prompt, build_condense_prompt
 
 load_dotenv()
 
@@ -87,6 +87,7 @@ model.eval()
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=1)
     session_ids: list = []
+    history: list = []
 
 
 class SummarizeRequest(BaseModel):
@@ -234,13 +235,38 @@ def ask_question(request: Request, data: AskRequest):
 
     if not vectorstores:
         return {"answer": "No documents found for selected sessions."}
+        
+    question = data.question
+    conversation_context = ""
+    if data.history:
+        for msg in data.history[-5:]:
+            role = msg.get("role", "user")
+            text = msg.get("text", "")
+            conversation_context += f"{role.capitalize()}: {text}\n"
+    
+    # ── Query Condensation ──
+    # If there is history, condense the follow-up question into a standalone query for better retrieval.
+    search_query = question
+    if conversation_context.strip():
+        print(f"[{data.session_ids[0]}] Condensing query for history length {len(data.history)}...")
+        condense_prompt = build_condense_prompt(question=question, conversation_context=conversation_context)
+        raw_condensed = generate_response(condense_prompt, max_new_tokens=50)
+        
+        # Clean up the condensed query (remove prompt echoes)
+        cleaned = raw_condensed.replace("Query:", "").strip()
+        if cleaned:
+            search_query = cleaned
+            print(f"[{data.session_ids[0]}] Original Question: '{question}'")
+            print(f"[{data.session_ids[0]}] Condensed Query: '{search_query}'")
 
     docs = []
     for vs in vectorstores:
-        docs.extend(vs.similarity_search(data.question, k=4))
+        docs.extend(vs.similarity_search(search_query, k=4))
 
     if not docs:
         return {"answer": "No relevant context found."}
+
+    context = "\n\n".join([d.page_content for d in docs])
 
     # ── Build minimal prompt via prompt_templates (reduces instruction echoing) ──
     prompt = build_ask_prompt(
